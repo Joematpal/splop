@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
 
 type Iterator interface {
@@ -68,7 +68,7 @@ func ReadGeoJson(filePath string) (Iterator, error) {
 		return nil, err
 	}
 	itr := &iterator{
-		next: make(chan string, 2),
+		next: make(chan string, 20),
 		err:  make(chan error, 1),
 		file: file,
 	}
@@ -108,20 +108,28 @@ func ReadGeoJson(filePath string) (Iterator, error) {
 }
 
 func LoadGeoJson(url, filePath string) error {
+	var wg sync.WaitGroup
 	iter, err := ReadGeoJson(filePath)
 	if err != nil {
 		return err
 	}
 
-	for s := range iter.Ch() {
-		resp, err := http.Post(url, "application/json", bytes.NewBufferString(s))
-		if err != nil {
-			fmt.Println("resp:", err)
-			log.Print(err)
-		} else {
-			log.Print(resp)
-		}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			for s := range iter.Ch() {
+				resp, err := http.Post(url, "application/json", bytes.NewBufferString(s))
+				if err != nil {
+					log.Print(err)
+				} else {
+					log.Print(resp)
+				}
+			}
+		}()
+		wg.Done()
 	}
 
-	return iter.Close()
+	defer iter.Close()
+
+	return wg.Wait()
 }
